@@ -1,13 +1,16 @@
-name: rapids_singlecell_p100
+name: rapids_env
 channels:
   - rapidsai
   - nvidia
   - conda-forge
   - bioconda
 dependencies:
-  - rapids=23.12
-  - python=3.10
-  - cuda-version=11.8
+  - rapids=26.02
+  - python=3.11
+  - cuda-version=13.1
+  - scanpy=1.10.4
+  - scikit-learn=1.5.2
+  - numba=0.61.*
   - cudnn
   - leidenalg
   - louvain
@@ -15,10 +18,11 @@ dependencies:
   - jupyterlab
   - pip
   - pip:
-    - rapids-singlecell==0.9.4
-    - scanpy
+    - rapids-singlecell==0.13.4
     - anndata
     - decoupler
     - omnipath
     - harmonypy
     - scikit-misc
+    - GPUtil
+    - setuptools<81

@@ -20,17 +20,19 @@ import scipy
 print(scipy.__version__)
 
 import rmm
+from rmm.allocators.cupy import rmm_cupy_allocator
 
 rmm.reinitialize(managed_memory=True)
-cp.cuda.set_allocator(rmm.rmm_cupy_allocator)
+cp.cuda.set_allocator(rmm_cupy_allocator)
 
-input_file = "1M_brain_cells_10X.sparse.h5ad"
+input_file = "datasets/brain_13M.csr.h5ad"
 
 # maximum number of cells to load from files
 USE_FIRST_N_CELLS = 1300000
 
 # marker genes
 MITO_GENE_PREFIX = "mt-"
+markers = []
 
 
 # filtering cells
@@ -165,9 +167,9 @@ print("Time Elapsed:", time_elapsed)
 time_sc.iloc[6, 0] = time_elapsed 
 
 # umap 
-sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=knn_n_pcs, method='rapids')
+sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=knn_n_pcs)
 
-sc.tl.umap(adata, min_dist=umap_min_dist, spread=umap_spread, method='rapids')
+sc.tl.umap(adata, min_dist=umap_min_dist, spread=umap_spread)
 
 end_time = time.time()
 time_elapsed = end_time - start_time
@@ -176,7 +178,7 @@ time_sc.iloc[7, 0] = time_elapsed
 
 # louvain 
 
-sc.tl.louvain(adata, flavor='rapids')
+sc.tl.louvain(adata)
 end_time = time.time()
 time_elapsed = end_time - start_time
 print("Time Elapsed:", time_elapsed)
@@ -194,3 +196,14 @@ time_sc.iloc[9, 0] = time_elapsed
 
 print(time_sc)
 time_sc
+
+# Save outputs
+import os, resource
+run_dir = "outputs/1.3M/rapids_1.3M/1"
+while os.path.exists(run_dir):
+    run_dir = f"outputs/1.3M/rapids_1.3M/{int(run_dir.rsplit('/', 1)[1]) + 1}"
+os.makedirs(run_dir, exist_ok=False)
+time_sc.to_csv(f"{run_dir}/execution_time.csv", index=True)
+pd.DataFrame({"peak_rss_mb": [resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024]}).to_csv(f"{run_dir}/memory_peak.csv", index=False)
+pd.DataFrame(adata.var_names, columns=["hvg"]).to_csv(f"{run_dir}/hvg.csv", index=False)
+adata.write(f"{run_dir}/result.h5ad")

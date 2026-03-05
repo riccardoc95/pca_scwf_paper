@@ -5,6 +5,10 @@ from sklearn.metrics import adjusted_rand_score
 from sklearn.metrics import silhouette_score
 import time
 import rapids_singlecell as rsc
+try:
+    from rapids_singlecell.get import anndata_to_GPU, anndata_to_CPU
+except ModuleNotFoundError:
+    from rapids_singlecell.utils import anndata_to_GPU, anndata_to_CPU
 import warnings
 warnings.filterwarnings("ignore")
 import rmm
@@ -20,7 +24,7 @@ cp.cuda.set_allocator(rmm_cupy_allocator)
 
 import numpy as np
 import anndata
-adata = sc.read("sc_mixolgy_10x_5cl.h5ad")
+adata = sc.read("datasets/sc_mixolgy_10x_5cl.h5ad")
 
 
 # save time usage #### 
@@ -28,7 +32,7 @@ time_sc = pd.DataFrame(index=["find_mit_gene", "filter", "normalization", "hvg",
                            "scaling", "PCA", "t-sne", "umap", "louvain", "leiden"],
                     columns=["time_sec"])
 
-rsc.get.anndata_to_GPU(adata)
+anndata_to_GPU(adata)
 print(adata.shape)
 
 # find mitocondrial genes ####
@@ -38,7 +42,7 @@ rsc.pp.flag_gene_family(adata, gene_family_name="mt", gene_family_prefix="mt-")
 rsc.pp.calculate_qc_metrics(adata, qc_vars=["mt"])
 
 # plot MT and RIBO
-#sc.pl.scatter(adata, x="total_counts", y="pct_counts_MT")
+#sc.pl.scatter(adata, x="total_counts", y="pct_counts_mt")
 #sc.pl.scatter(adata, x="total_counts", y="n_genes_by_counts")
 
 end_time = time.time()
@@ -51,7 +55,7 @@ start_time = time.time()
 
 #sc.pl.violin(adata, "n_genes_by_counts", jitter=0.4, groupby="PatientNumber")
 #sc.pl.violin(adata, "total_counts", jitter=0.4, groupby="PatientNumber")
-#sc.pl.violin(adata, "pct_counts_MT", jitter=0.4, groupby="PatientNumber")
+#sc.pl.violin(adata, "pct_counts_mt", jitter=0.4, groupby="PatientNumber")
 adata = adata[adata.obs["n_genes_by_counts"] > 3]
 adata = adata[adata.obs["n_genes_by_counts"] < 6200]
 print(adata.shape)
@@ -59,7 +63,7 @@ print(adata.shape)
 adata = adata[adata.obs["pct_counts_mt"] < 5]
 print(adata.shape)
 
-rsc.pp.filter_genes(adata, min_count=3)
+rsc.pp.filter_genes(adata, min_counts=3)
 
 adata.layers["counts"] = adata.X.copy()
 print(adata.shape)
@@ -95,7 +99,7 @@ adata.raw = adata
 adata = adata[:, adata.var["highly_variable"]]
 adata.shape
 
-rsc.pp.regress_out(adata, keys=["total_counts", "pct_counts_MT"])
+rsc.pp.regress_out(adata, keys=["total_counts", "pct_counts_mt"])
 
 end_time = time.time()
 time_elapsed = end_time - start_time
@@ -116,7 +120,7 @@ time_sc.iloc[4, 0] = time_elapsed
 start_time = time.time()
 rsc.pp.pca(adata, n_comps=50)
 # sc.pl.pca_variance_ratio(adata, log=True, n_pcs=50)
-rsc.get.anndata_to_CPU(adata, convert_all=True)
+anndata_to_CPU(adata, convert_all=True)
 
 end_time = time.time()
 time_elapsed = end_time - start_time
@@ -209,3 +213,14 @@ print("Average Silhouette Score:", silhouette_avg)
 time_sc
 print(time_sc)
 
+
+# Save outputs
+import os, resource
+run_dir = "outputs/sc_mix/rapids_sc_mix/1"
+while os.path.exists(run_dir):
+    run_dir = f"outputs/sc_mix/rapids_sc_mix/{int(run_dir.rsplit('/', 1)[1]) + 1}"
+os.makedirs(run_dir, exist_ok=False)
+time_sc.to_csv(f"{run_dir}/execution_time.csv", index=True)
+pd.DataFrame({"peak_rss_mb": [resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024]}).to_csv(f"{run_dir}/memory_peak.csv", index=False)
+pd.DataFrame(adata.var.highly_variable, columns=["hvg"]).to_csv(f"{run_dir}/hvg.csv", index=False)
+adata.write(f"{run_dir}/result.h5ad")

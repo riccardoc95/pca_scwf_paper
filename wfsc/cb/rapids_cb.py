@@ -32,7 +32,7 @@ time_sc = pd.DataFrame(index=["find_mit_gene", "filter", "normalization", "hvg",
 
 # data ####
 
-adata = sc.read_h5ad("cord_blood.h5ad")
+adata = sc.read_h5ad("datasets/cord_blood.h5ad")
 adata.var_names_make_unique()  
 adata
 
@@ -41,11 +41,7 @@ adata.X = adata.X.astype('float32')
 X_sparse = sparse.csr_matrix(adata.X)
 celltype = cudf.Series(adata.obs['celltype'])
 cells = cudf.Series(adata.obs_names)
-X_sparse.colnames = adata.obs_names
-print("X_sparse.colnames", X_sparse.colnames)
 sparse_gpu_array = cp.sparse.csr_matrix(X_sparse)
-sparse_gpu_array.colnames = adata.obs_names
-print("sparse_gpu_array.colnames", sparse_gpu_array.colnames)
 sparse_gpu_array.shape
 print(sparse_gpu_array.shape)
 
@@ -62,7 +58,7 @@ time_sc.iloc[0, 0] = time_elapsed
 # filter data ####
 start_time = time.time()
 
-sparse_gpu_array, cells = rapids_scanpy_funcs.filter_cells_2(sparse_gpu_array, cells_idx=cells, min_genes=200, max_genes=2500)
+sparse_gpu_array, cells = rapids_scanpy_funcs.filter_cells(sparse_gpu_array, barcodes=cells, min_genes=200, max_genes=2500)
 print("cell dim:",cells.shape)
 print("count matrix dim:", sparse_gpu_array.shape)
 
@@ -102,13 +98,13 @@ end_time = time.time()
 time_elapsed = end_time - start_time
 print("Time Elapsed:", time_elapsed)
 time_sc.iloc[3, 0] = time_elapsed
-print("sparse_gpu_array.colnames", sparse_gpu_array.colnames)
+print("sparse_gpu_array.shape", sparse_gpu_array.shape)
 
 # Scaling the data ####
 start_time = time.time()
 
 # sparse_gpu_array = cp.clip(StandardScaler().fit_transform(sparse_gpu_array), a_min = -10, a_max=10, with_mean=False)
-print("sparse_gpu_array.colnames", sparse_gpu_array.colnames)
+print("sparse_gpu_array.shape", sparse_gpu_array.shape)
 
 mean = sparse_gpu_array.mean(axis=0)
 sparse_gpu_array -= mean
@@ -122,21 +118,14 @@ time_elapsed = end_time - start_time
 print("Time Elapsed:", time_elapsed)
 time_sc.iloc[4, 0] = time_elapsed
 
-
-print("sparse_gpu_array.colnames", sparse_gpu_array.colnames)
+print("sparse_gpu_array.shape", sparse_gpu_array.shape)
 
 adata = anndata.AnnData(sparse_gpu_array.get())
 adata.var_names = genes.to_pandas()
 adata.obs_names = cells.to_pandas()
 
-#common_elements = adata.obs_names.intersection(celltype.index)
-common_elements = sparse_gpu_array.obs_names.intersection(celltype.index)
-
-print("dim common elements:", common_elements.shape)
-new_celltype = celltype.loc[common_elements]
-print("dim new celltype:", new_celltype.shape)
-
-adata.obs['celltype'] = new_celltype
+celltype_pd = celltype.to_pandas()
+adata.obs["celltype"] = celltype_pd.loc[adata.obs_names].values
 
 
 
@@ -162,10 +151,10 @@ time_sc.iloc[6, 0] = time_elapsed
 start_time = time.time()
 n_neighbors = 15 # Number of nearest neighbors for KNN graph
 knn_n_pcs = 50 # Number of principal components to use for finding nearest neighbors
-sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=knn_n_pcs, method='rapids')
+sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=knn_n_pcs) # , method='rapids'
 umap_min_dist=0.3
 umap_spread=1.0
-sc.tl.umap(adata, min_dist=umap_min_dist, spread=umap_spread, method='rapids')
+sc.tl.umap(adata, min_dist=umap_min_dist, spread=umap_spread) # , method='rapids'
 
 end_time = time.time()
 time_elapsed = end_time - start_time
@@ -177,8 +166,8 @@ start_time = time.time()
 
 n_neighbors=25
 knn_n_pcs=50
-sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=knn_n_pcs, method='rapids')
-sc.tl.louvain(adata, flavor='rapids', resolution = 0.15)
+sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=knn_n_pcs) # , method='rapids'
+sc.tl.louvain(adata, resolution = 0.15) #  flavor='rapids'
 
 end_time = time.time()
 time_elapsed = end_time - start_time
@@ -232,3 +221,14 @@ print("Average Silhouette Score:", silhouette_avg)
 
 print(time_sc)
 time_sc
+
+# Save outputs
+import os, resource
+run_dir = "outputs/cb/rapids_cb/1"
+while os.path.exists(run_dir):
+    run_dir = f"outputs/cb/rapids_cb/{int(run_dir.rsplit('/', 1)[1]) + 1}"
+os.makedirs(run_dir, exist_ok=False)
+time_sc.to_csv(f"{run_dir}/execution_time.csv", index=True)
+pd.DataFrame({"peak_rss_mb": [resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024]}).to_csv(f"{run_dir}/memory_peak.csv", index=False)
+pd.DataFrame(adata.var_names, columns=["hvg"]).to_csv(f"{run_dir}/hvg.csv", index=False)
+adata.write(f"{run_dir}/result.h5ad")
